@@ -2,9 +2,9 @@ const fs = require('fs');
 const path = require('path');
 const gulp = require('gulp');
 const ts = require('gulp-typescript');
-const gulpSequence = require('gulp-sequence');
 const sourcemaps = require('gulp-sourcemaps');
 const clean = require('gulp-clean');
+const deleteEmpty = require('delete-empty');
 
 const packages = {
   common: ts.createProject('packages/common/tsconfig.json'),
@@ -16,26 +16,41 @@ const packages = {
 const modules = Object.keys(packages);
 const source = 'packages';
 const distId = process.argv.indexOf('--dist');
-const dist = distId < 0 ? 'node_modules/@nestjs' : process.argv[distId + 1];
+const dist = distId < 0 ? source : process.argv[distId + 1];
 
 gulp.task('default', function() {
   modules.forEach(module => {
     gulp.watch(
       [`${source}/${module}/**/*.ts`, `${source}/${module}/*.ts`],
-      [module]
+      [module],
     );
   });
 });
 
-gulp.task('copy:ts', function() {
-  return gulp.packages(['packages/**/*.ts']).pipe(gulp.dest('./bundle'));
+gulp.task('copy-misc', function() {
+  return gulp
+    .src(['Readme.md', 'LICENSE', '.npmignore'])
+    .pipe(gulp.dest(`${source}/common`))
+    .pipe(gulp.dest(`${source}/core`))
+    .pipe(gulp.dest(`${source}/microservices`))
+    .pipe(gulp.dest(`${source}/websockets`))
+    .pipe(gulp.dest(`${source}/testing`));
 });
 
-gulp.task('clean:bundle', function() {
+gulp.task('clean:output', function() {
   return gulp
-    .packages(['bundle/**/*.js.map', 'bundle/**/*.ts', '!bundle/**/*.d.ts'], { read: false })
+    .src([`${source}/**/*.js`, `${source}/**/*.d.ts`], {
+      read: false,
+    })
     .pipe(clean());
 });
+
+gulp.task('clean:dirs', function(done) {
+  deleteEmpty.sync(`${source}/`);
+  done();
+});
+
+gulp.task('clean:bundle', gulp.series('clean:output', 'clean:dirs'));
 
 modules.forEach(module => {
   gulp.task(module, () => {
@@ -53,27 +68,16 @@ modules.forEach(module => {
       .pipe(sourcemaps.init())
       .pipe(packages[module]())
       .pipe(
-        sourcemaps.mapSources(sourcePath => './' + sourcePath.split('/').pop())
+        sourcemaps.mapSources(sourcePath => './' + sourcePath.split('/').pop()),
       )
       .pipe(sourcemaps.write('.'))
       .pipe(gulp.dest(`${dist}/${module}`));
   });
 });
 
-gulp.task('build', function(cb) {
-  gulpSequence('common', modules.filter(module => module !== 'common'), cb);
-});
-
-gulp.task('build:dev', function(cb) {
-  gulpSequence(
-    'common:dev',
-    modules
-      .filter(module => module !== 'common')
-      .map(module => module + ':dev'),
-    'copy:ts',
-    cb
-  );
-});
+gulp.task('common:dev', gulp.series(modules.map(module => module + ':dev')));
+gulp.task('build', gulp.series(modules));
+gulp.task('build:dev', gulp.series('common:dev'));
 
 function getFolders(dir) {
   return fs.readdirSync(dir).filter(function(file) {
@@ -81,17 +85,16 @@ function getFolders(dir) {
   });
 }
 gulp.task('move', function() {
-  const getDirs = (base) => getFolders(base)
-    .map((path) => `${base}/${path}`);
+  const getDirs = base => getFolders(base).map(path => `${base}/${path}`);
 
   const examplesDirs = getDirs('sample');
   const integrationDirs = getDirs('integration');
   const directories = examplesDirs.concat(integrationDirs);
 
-  let stream = gulp
-    .src(['node_modules/@nestjs/**/*']);
+  let stream = gulp.src(['node_modules/@nestjs/**/*']);
 
-  directories.forEach((dir) => {
+  directories.forEach(dir => {
     stream = stream.pipe(gulp.dest(dir + '/node_modules/@nestjs'));
   });
+  return stream;
 });

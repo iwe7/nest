@@ -1,7 +1,7 @@
-import * as sinon from 'sinon';
 import { expect } from 'chai';
-import { ServerTCP } from '../../server/server-tcp';
+import * as sinon from 'sinon';
 import { NO_PATTERN_MESSAGE } from '../../constants';
+import { ServerTCP } from '../../server/server-tcp';
 
 describe('ServerTCP', () => {
   let server: ServerTCP;
@@ -56,7 +56,7 @@ describe('ServerTCP', () => {
         sendMessage: sinon.spy(),
       };
     });
-    it('should send NO_PATTERN_MESSAGE error if key is not exists in handlers object', () => {
+    it('should send NO_PATTERN_MESSAGE error if key does not exists in handlers object', () => {
       server.handleMessage(socket, msg);
       expect(
         socket.sendMessage.calledWith({
@@ -69,7 +69,7 @@ describe('ServerTCP', () => {
     it('should call handler if exists in handlers object', () => {
       const handler = sinon.spy();
       (server as any).messageHandlers = {
-        [JSON.stringify(msg.pattern)]: handler as any,
+        [msg.pattern]: handler as any,
       };
       server.handleMessage(socket, msg);
       expect(handler.calledOnce).to.be.true;
@@ -100,14 +100,14 @@ describe('ServerTCP', () => {
     });
     describe('otherwise', () => {
       it('should return delay (ms)', () => {
-        (server as any).options.options = {};
+        (server as any).options = {};
         (server as any).isExplicitlyTerminated = false;
-        (server as any).options.options.retryAttempts = 3;
+        (server as any).options.retryAttempts = 3;
         (server as any).retryAttemptsCount = 2;
-        (server as any).options.options.retryDelay = 3;
+        (server as any).options.retryDelay = 3;
         const result = server.handleClose();
         expect(result).to.be.not.undefined;
       });
-    })
+    });
   });
 });

@@ -1,6 +1,6 @@
 import * as sinon from 'sinon';
 import { expect } from 'chai';
-import { GuardsConsumer } from './../../guards/guards-consumer';
+import { GuardsConsumer } from '../../guards/guards-consumer';
 import { Observable, of } from 'rxjs';
 
 describe('GuardsConsumer', () => {
@@ -49,10 +49,10 @@ describe('GuardsConsumer', () => {
   });
   describe('pickResult', () => {
     describe('when result is Observable', () => {
-      it('should returns promise', () => {
+      it('should returns result', async () => {
         expect(
-          consumer.pickResult(of(true)),
-        ).to.eventually.instanceOf(Promise);
+          await consumer.pickResult(of(true)),
+        ).to.be.true;
       });
     });
     describe('when result is Promise', () => {

@@ -1,17 +1,21 @@
-import * as net from 'net';
+import { isString } from '@nestjs/common/utils/shared.utils';
 import * as JsonSocket from 'json-socket';
+import * as net from 'net';
 import { Server as NetSocket } from 'net';
-import { NO_PATTERN_MESSAGE, CLOSE_EVENT } from '../constants';
-import { Server } from './server';
-import { CustomTransportStrategy, ReadPacket } from './../interfaces';
-import { Observable, EMPTY as empty } from 'rxjs';
-import { catchError, finalize } from 'rxjs/operators';
-import { TCP_DEFAULT_PORT, MESSAGE_EVENT, ERROR_EVENT } from './../constants';
+import { Observable } from 'rxjs';
+import {
+  CLOSE_EVENT,
+  ERROR_EVENT,
+  MESSAGE_EVENT,
+  NO_PATTERN_MESSAGE,
+  TCP_DEFAULT_PORT,
+} from '../constants';
+import { CustomTransportStrategy, PacketId, ReadPacket } from '../interfaces';
 import {
   MicroserviceOptions,
   TcpOptions,
 } from '../interfaces/microservice-configuration.interface';
-import { PacketId } from './../interfaces';
+import { Server } from './server';
 
 export class ServerTCP extends Server implements CustomTransportStrategy {
   private readonly port: number;
@@ -19,7 +23,7 @@ export class ServerTCP extends Server implements CustomTransportStrategy {
   private isExplicitlyTerminated = false;
   private retryAttemptsCount = 0;
 
-  constructor(private readonly options: MicroserviceOptions) {
+  constructor(private readonly options: MicroserviceOptions['options']) {
     super();
     this.port =
       this.getOptionsProp<TcpOptions>(options, 'port') || TCP_DEFAULT_PORT;
@@ -37,14 +41,15 @@ export class ServerTCP extends Server implements CustomTransportStrategy {
 
   public bindHandler(socket) {
     const readSocket = this.getSocketInstance(socket);
-    readSocket.on(
-      MESSAGE_EVENT,
-      async msg => await this.handleMessage(readSocket, msg),
+    readSocket.on(MESSAGE_EVENT, async msg =>
+      this.handleMessage(readSocket, msg),
     );
   }
 
   public async handleMessage(socket, packet: ReadPacket & PacketId) {
-    const pattern = JSON.stringify(packet.pattern);
+    const pattern = !isString(packet.pattern)
+      ? JSON.stringify(packet.pattern)
+      : packet.pattern;
     const status = 'error';
 
     if (!this.messageHandlers[pattern]) {

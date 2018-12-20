@@ -1,7 +1,8 @@
-import * as sinon from 'sinon';
 import { expect } from 'chai';
-import { ModuleTokenFactory } from '../../injector/module-token-factory';
+import * as hash from 'object-hash';
 import { SingleScope } from '../../../common';
+import { ModuleTokenFactory } from '../../injector/module-token-factory';
+import safeStringify from 'fast-safe-stringify';
 
 describe('ModuleTokenFactory', () => {
   let factory: ModuleTokenFactory;
@@ -12,9 +13,9 @@ describe('ModuleTokenFactory', () => {
     class Module {}
     it('should force global scope when it is not set', () => {
       const scope = 'global';
-      const token = factory.create(Module as any, [Module as any], undefined);
+      const token = factory.create(Module as any, [Module], undefined);
       expect(token).to.be.deep.eq(
-        JSON.stringify({
+        hash({
           module: Module.name,
           dynamic: '',
           scope,
@@ -24,11 +25,11 @@ describe('ModuleTokenFactory', () => {
     it('should returns expected token', () => {
       const token = factory.create(
         SingleScope()(Module) as any,
-        [Module as any],
+        [Module],
         undefined,
       );
       expect(token).to.be.deep.eq(
-        JSON.stringify({
+        hash({
           module: Module.name,
           dynamic: '',
           scope: [Module.name],
@@ -38,15 +39,15 @@ describe('ModuleTokenFactory', () => {
     it('should include dynamic metadata', () => {
       const token = factory.create(
         SingleScope()(Module) as any,
-        [Module as any],
+        [Module],
         {
           components: [{}],
         } as any,
       );
       expect(token).to.be.deep.eq(
-        JSON.stringify({
+        hash({
           module: Module.name,
-          dynamic: JSON.stringify({
+          dynamic: safeStringify({
             components: [{}],
           }),
           scope: [Module.name],
@@ -62,7 +63,7 @@ describe('ModuleTokenFactory', () => {
   });
   describe('getDynamicMetadataToken', () => {
     describe('when metadata exists', () => {
-      it('should return stringified metadata', () => {
+      it('should return hash', () => {
         const metadata = { components: ['', {}] };
         expect(factory.getDynamicMetadataToken(metadata as any)).to.be.eql(
           JSON.stringify(metadata),

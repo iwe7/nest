@@ -1,24 +1,22 @@
-import { Server } from './server';
-import { NO_PATTERN_MESSAGE } from '../constants';
+import { Observable } from 'rxjs';
+import {
+  CONNECT_EVENT,
+  ERROR_EVENT,
+  MESSAGE_EVENT,
+  NO_PATTERN_MESSAGE,
+  REDIS_DEFAULT_URL,
+} from '../constants';
+import {
+  ClientOpts,
+  RedisClient,
+  RetryStrategyOptions,
+} from '../external/redis.interface';
+import { CustomTransportStrategy, PacketId, ReadPacket } from '../interfaces';
 import {
   MicroserviceOptions,
   RedisOptions,
 } from '../interfaces/microservice-configuration.interface';
-import { CustomTransportStrategy, PacketId } from './../interfaces';
-import { Observable, EMPTY as empty } from 'rxjs';
-import { catchError, finalize } from 'rxjs/operators';
-import {
-  REDIS_DEFAULT_URL,
-  CONNECT_EVENT,
-  MESSAGE_EVENT,
-  ERROR_EVENT,
-} from './../constants';
-import { ReadPacket } from '@nestjs/microservices';
-import {
-  RedisClient,
-  ClientOpts,
-  RetryStrategyOptions,
-} from '../external/redis.interface';
+import { Server } from './server';
 
 let redisPackage: any = {};
 
@@ -28,7 +26,7 @@ export class ServerRedis extends Server implements CustomTransportStrategy {
   private pubClient: RedisClient;
   private isExplicitlyTerminated = false;
 
-  constructor(private readonly options: MicroserviceOptions) {
+  constructor(private readonly options: MicroserviceOptions['options']) {
     super();
     this.url =
       this.getOptionsProp<RedisOptions>(this.options, 'url') ||
@@ -73,8 +71,7 @@ export class ServerRedis extends Server implements CustomTransportStrategy {
   }
 
   public getMessageHandler(pub: RedisClient) {
-    return async (channel, buffer) =>
-      await this.handleMessage(channel, buffer, pub);
+    return async (channel, buffer) => this.handleMessage(channel, buffer, pub);
   }
 
   public async handleMessage(channel, buffer: string | any, pub: RedisClient) {
@@ -130,7 +127,10 @@ export class ServerRedis extends Server implements CustomTransportStrategy {
 
   public createRetryStrategy(
     options: RetryStrategyOptions,
-  ): undefined | number {
+  ): undefined | number | void {
+    if (options.error && (options.error as any).code === 'ECONNREFUSED') {
+      return this.logger.error(`Error ECONNREFUSED: ${this.url}`);
+    }
     if (
       this.isExplicitlyTerminated ||
       !this.getOptionsProp<RedisOptions>(this.options, 'retryAttempts') ||
@@ -139,6 +139,6 @@ export class ServerRedis extends Server implements CustomTransportStrategy {
     ) {
       return undefined;
     }
-    return this.getOptionsProp(this.options, 'retryDelay') || 0;
+    return this.getOptionsProp<RedisOptions>(this.options, 'retryDelay') || 0;
   }
 }

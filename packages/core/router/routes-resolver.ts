@@ -1,16 +1,16 @@
-import { NestContainer, InstanceWrapper } from '../injector/container';
-import { RouterProxy } from './router-proxy';
-import { Controller } from '@nestjs/common/interfaces/controllers/controller.interface';
-import { Logger } from '@nestjs/common/services/logger.service';
-import { controllerMappingMessage } from '../helpers/messages';
-import { Resolver } from './interfaces/resolver.interface';
-import { RouterExceptionFilters } from './router-exception-filters';
-import { MetadataScanner } from '../metadata-scanner';
-import { RouterExplorer } from './router-explorer';
-import { ApplicationConfig } from './../application-config';
-import { NotFoundException, BadRequestException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { MODULE_PATH } from '@nestjs/common/constants';
 import { HttpServer } from '@nestjs/common/interfaces';
+import { Controller } from '@nestjs/common/interfaces/controllers/controller.interface';
+import { Logger } from '@nestjs/common/services/logger.service';
+import { ApplicationConfig } from '../application-config';
+import { CONTROLLER_MAPPING_MESSAGE } from '../helpers/messages';
+import { InstanceWrapper, NestContainer } from '../injector/container';
+import { MetadataScanner } from '../metadata-scanner';
+import { Resolver } from './interfaces/resolver.interface';
+import { RouterExceptionFilters } from './router-exception-filters';
+import { RouterExplorer } from './router-explorer';
+import { RouterProxy } from './router-proxy';
 
 export class RoutesResolver implements Resolver {
   private readonly logger = new Logger(RoutesResolver.name, true);
@@ -45,8 +45,6 @@ export class RoutesResolver implements Resolver {
       path = path ? path + basePath : basePath;
       this.registerRouters(routes, moduleName, path, appInstance);
     });
-    this.registerNotFoundHandler();
-    this.registerExceptionHandler();
   }
 
   public registerRouters(
@@ -59,7 +57,7 @@ export class RoutesResolver implements Resolver {
       const path = this.routerBuilder.extractRouterPath(metatype, basePath);
       const controllerName = metatype.name;
 
-      this.logger.log(controllerMappingMessage(controllerName, path));
+      this.logger.log(CONTROLLER_MAPPING_MESSAGE(controllerName, path));
       this.routerBuilder.explore(
         instance,
         metatype,
@@ -79,7 +77,7 @@ export class RoutesResolver implements Resolver {
     };
     const handler = this.routerExceptionsFilter.create(
       {},
-      callback as any,
+      callback,
       undefined,
     );
     const proxy = this.routerProxy.createProxy(callback, handler);

@@ -1,28 +1,50 @@
-import { Observable, Observer, throwError as _throw } from 'rxjs';
-import { isNil } from '@nestjs/common/utils/shared.utils';
-import { InvalidMessageException } from '../exceptions/invalid-message.exception';
+import { randomStringGenerator } from '@nestjs/common/utils/random-string-generator.util';
+import { isNil, isString } from '@nestjs/common/utils/shared.utils';
 import {
-  ReadPacket,
-  PacketId,
-  WritePacket,
+  defer,
+  fromEvent,
+  merge,
+  Observable,
+  Observer,
+  throwError as _throw,
+} from 'rxjs';
+import { map, mergeMap, take } from 'rxjs/operators';
+import { CONNECT_EVENT, ERROR_EVENT } from '../constants';
+import { InvalidMessageException } from '../exceptions/errors/invalid-message.exception';
+import {
   ClientOptions,
-} from './../interfaces';
+  PacketId,
+  ReadPacket,
+  WritePacket,
+} from '../interfaces';
 
 export abstract class ClientProxy {
+  public abstract connect(): Promise<any>;
   public abstract close(): any;
-  protected abstract publish(
-    packet: ReadPacket,
-    callback: (packet: WritePacket) => void,
-  );
+  protected routingMap = new Map<string, Function>();
 
-  public send<T = any>(pattern: any, data: any): Observable<T> {
+  public send<TResult = any, TInput = any>(
+    pattern: any,
+    data: TInput,
+  ): Observable<TResult> {
     if (isNil(pattern) || isNil(data)) {
       return _throw(new InvalidMessageException());
     }
-    return new Observable((observer: Observer<T>) => {
-      this.publish({ pattern, data }, this.createObserver(observer));
-    });
+    return defer(async () => this.connect()).pipe(
+      mergeMap(
+        () =>
+          new Observable((observer: Observer<TResult>) => {
+            const callback = this.createObserver(observer);
+            return this.publish({ pattern, data }, callback);
+          }),
+      ),
+    );
   }
+
+  protected abstract publish(
+    packet: ReadPacket,
+    callback: (packet: WritePacket) => void,
+  ): Function | void;
 
   protected createObserver<T>(
     observer: Observer<T>,
@@ -38,18 +60,33 @@ export abstract class ClientProxy {
   }
 
   protected assignPacketId(packet: ReadPacket): ReadPacket & PacketId {
-    const id =
-      Math.random()
-        .toString(36)
-        .substr(2, 5) + Date.now();
+    const id = randomStringGenerator();
     return Object.assign(packet, { id });
   }
 
+  protected connect$(
+    instance: any,
+    errorEvent = ERROR_EVENT,
+    connectEvent = CONNECT_EVENT,
+  ): Observable<any> {
+    const error$ = fromEvent(instance, errorEvent).pipe(
+      map(err => {
+        throw err;
+      }),
+    );
+    const connect$ = fromEvent(instance, connectEvent);
+    return merge(error$, connect$).pipe(take(1));
+  }
+
   protected getOptionsProp<T extends { options? }>(
-    obj: ClientOptions,
+    obj: ClientOptions['options'],
     prop: keyof T['options'],
     defaultValue = undefined,
   ) {
-    return obj && obj.options ? obj.options[prop as any] : defaultValue;
+    return obj ? obj[prop as string] : defaultValue;
+  }
+
+  protected normalizePattern<T = any>(pattern: T): string {
+    return isString(pattern) ? pattern : JSON.stringify(pattern);
   }
 }

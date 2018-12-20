@@ -1,29 +1,31 @@
-import * as net from 'net';
+import { Logger } from '@nestjs/common';
 import * as JsonSocket from 'json-socket';
-import { ClientProxy } from './client-proxy';
+import * as net from 'net';
+import { share, tap } from 'rxjs/operators';
+import {
+  CLOSE_EVENT,
+  ERROR_EVENT,
+  MESSAGE_EVENT,
+  TCP_DEFAULT_HOST,
+  TCP_DEFAULT_PORT,
+} from '../constants';
+import { PacketId, ReadPacket, WritePacket } from '../interfaces';
 import {
   ClientOptions,
   TcpClientOptions,
 } from '../interfaces/client-metadata.interface';
-import { Logger } from '@nestjs/common';
-import {
-  TCP_DEFAULT_PORT,
-  TCP_DEFAULT_HOST,
-  CONNECT_EVENT,
-  MESSAGE_EVENT,
-  ERROR_EVENT,
-  CLOSE_EVENT,
-} from './../constants';
-import { WritePacket, ReadPacket, PacketId } from './../interfaces';
+import { ClientProxy } from './client-proxy';
+import { ECONNREFUSED } from './constants';
 
 export class ClientTCP extends ClientProxy {
+  protected connection: Promise<any>;
   private readonly logger = new Logger(ClientTCP.name);
   private readonly port: number;
   private readonly host: string;
   private isConnected = false;
   private socket: JsonSocket;
 
-  constructor(options: ClientOptions) {
+  constructor(options: ClientOptions['options']) {
     super();
     this.port =
       this.getOptionsProp<TcpClientOptions>(options, 'port') ||
@@ -33,55 +35,40 @@ export class ClientTCP extends ClientProxy {
       TCP_DEFAULT_HOST;
   }
 
-  public init(callback: (...args) => any): Promise<JsonSocket> {
-    this.socket = this.createSocket();
-    return new Promise(resolve => {
-      this.bindEvents(this.socket, callback);
-      this.socket._socket.once(CONNECT_EVENT, () => {
-        this.isConnected = true;
-        resolve(this.socket);
-      });
-      this.socket.connect(this.port, this.host);
-    });
-  }
-
-  protected async publish(
-    partialPacket: ReadPacket,
-    callback: (packet: WritePacket) => any,
-  ) {
-    const handleRequestResponse = (jsonSocket: JsonSocket) => {
-      const packet = this.assignPacketId(partialPacket);
-      jsonSocket.sendMessage(packet);
-      const listener = (buffer: WritePacket & PacketId) => {
-        if (buffer.id !== packet.id) {
-          return undefined;
-        }
-        this.handleResponse(jsonSocket, callback, buffer, listener);
-      };
-      jsonSocket.on(MESSAGE_EVENT, listener);
-    };
-    if (this.isConnected) {
-      return handleRequestResponse(this.socket);
+  public connect(): Promise<any> {
+    if (this.isConnected && this.connection) {
+      return this.connection;
     }
-    const socket = await this.init(callback);
-    handleRequestResponse(socket);
-    return;
+    this.socket = this.createSocket();
+    this.bindEvents(this.socket);
+
+    const source$ = this.connect$(this.socket._socket).pipe(
+      tap(() => {
+        this.isConnected = true;
+        this.socket.on(MESSAGE_EVENT, (buffer: WritePacket & PacketId) =>
+          this.handleResponse(buffer),
+        );
+      }),
+      share(),
+    );
+
+    this.socket.connect(this.port, this.host);
+    this.connection = source$.toPromise();
+    return this.connection;
   }
 
-  public handleResponse(
-    socket: JsonSocket,
-    callback: (packet: WritePacket) => any,
-    buffer: WritePacket,
-    context: Function,
-  ) {
-    const { err, response, isDisposed } = buffer;
+  public handleResponse(buffer: WritePacket & PacketId) {
+    const { err, response, isDisposed, id } = buffer;
+    const callback = this.routingMap.get(id);
+    if (!callback) {
+      return undefined;
+    }
     if (isDisposed || err) {
       callback({
         err,
         response: null,
         isDisposed: true,
       });
-      return socket._socket.removeListener(MESSAGE_EVENT, context);
     }
     callback({
       err,
@@ -98,20 +85,36 @@ export class ClientTCP extends ClientProxy {
     this.handleClose();
   }
 
-  public bindEvents(socket: JsonSocket, callback: (...args) => any) {
-    socket.on(ERROR_EVENT, err => this.handleError(err, callback));
+  public bindEvents(socket: JsonSocket) {
+    socket.on(
+      ERROR_EVENT,
+      err => err.code !== ECONNREFUSED && this.handleError(err),
+    );
     socket.on(CLOSE_EVENT, () => this.handleClose());
   }
 
-  public handleError(err: any, callback: (...args) => any) {
-    if (err.code === 'ECONNREFUSED') {
-      callback(err, null);
-    }
+  public handleError(err: any) {
     this.logger.error(err);
   }
 
   public handleClose() {
     this.isConnected = false;
     this.socket = null;
+  }
+
+  protected publish(
+    partialPacket: ReadPacket,
+    callback: (packet: WritePacket) => any,
+  ): Function {
+    try {
+      const packet = this.assignPacketId(partialPacket);
+
+      this.routingMap.set(packet.id, callback);
+      this.socket.sendMessage(packet);
+
+      return () => this.routingMap.delete(packet.id);
+    } catch (err) {
+      callback({ err });
+    }
   }
 }

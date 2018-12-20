@@ -1,14 +1,7 @@
-import { Controller, Post, Body, HttpCode } from '@nestjs/common';
-import {
-  Client,
-  MessagePattern,
-  ClientProxy,
-  Transport,
-  GrpcRoute,
-  ClientGrpc,
-} from '@nestjs/microservices';
-import { Observable, of } from 'rxjs';
+import { Body, Controller, HttpCode, Post } from '@nestjs/common';
+import { Client, ClientGrpc, GrpcMethod, Transport } from '@nestjs/microservices';
 import { join } from 'path';
+import { Observable, of } from 'rxjs';
 
 @Controller()
 export class GrpcController {
@@ -25,10 +18,10 @@ export class GrpcController {
   @HttpCode(200)
   call(@Body() data: number[]): Observable<number> {
     const svc = this.client.getService<any>('Math');
-    return svc.sum(data);
+    return svc.sum({ data });
   }
 
-  @GrpcRoute('Math', 'Sum')
+  @GrpcMethod('Math')
   async sum({ data }: { data: number[] }): Promise<any> {
     return of({
       result: data.reduce((a, b) => a + b),

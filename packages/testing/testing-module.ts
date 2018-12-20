@@ -1,21 +1,23 @@
-import * as optional from 'optional';
-import { NestContainer } from '@nestjs/core/injector/container';
-import { NestApplication, NestApplicationContext } from '@nestjs/core';
-import { Type } from '@nestjs/common/interfaces/type.interface';
-import { INestApplication, INestMicroservice } from '@nestjs/common';
+import {
+  HttpServer,
+  INestApplication,
+  INestMicroservice,
+  Logger,
+} from '@nestjs/common';
 import { MicroserviceOptions } from '@nestjs/common/interfaces/microservices/microservice-configuration.interface';
-import { MicroservicesPackageNotFoundException } from '@nestjs/core/errors/exceptions/microservices-package-not-found.exception';
-import { ApplicationConfig } from '@nestjs/core/application-config';
-import { HttpServer } from '@nestjs/common';
-import { ExpressFactory } from '@nestjs/core/adapters/express-factory';
-import { ExpressAdapter } from '@nestjs/core/adapters/express-adapter';
-import { FastifyAdapter } from '@nestjs/core/adapters/fastify-adapter';
+import { NestMicroserviceOptions } from '@nestjs/common/interfaces/microservices/nest-microservice-options.interface';
+import { NestApplicationContextOptions } from '@nestjs/common/interfaces/nest-application-context-options.interface';
 import { NestApplicationOptions } from '@nestjs/common/interfaces/nest-application-options.interface';
-import { INestFastifyApplication } from '@nestjs/common/interfaces/nest-fastify-application.interface';
 import { INestExpressApplication } from '@nestjs/common/interfaces/nest-express-application.interface';
-
-const { NestMicroservice } =
-  optional('@nestjs/microservices/nest-microservice') || ({} as any);
+import { INestFastifyApplication } from '@nestjs/common/interfaces/nest-fastify-application.interface';
+import { Type } from '@nestjs/common/interfaces/type.interface';
+import { loadPackage } from '@nestjs/common/utils/load-package.util';
+import { NestApplication, NestApplicationContext } from '@nestjs/core';
+import { ExpressAdapter } from '@nestjs/core/adapters/express-adapter';
+import { ExpressFactory } from '@nestjs/core/adapters/express-factory';
+import { FastifyAdapter } from '@nestjs/core/adapters/fastify-adapter';
+import { ApplicationConfig } from '@nestjs/core/application-config';
+import { NestContainer } from '@nestjs/core/injector/container';
 
 export class TestingModule extends NestApplicationContext {
   constructor(
@@ -28,13 +30,13 @@ export class TestingModule extends NestApplicationContext {
   }
 
   public createNestApplication(
-    httpServer?: FastifyAdapter,
-    options?: NestApplicationOptions,
-  ): INestApplication & INestFastifyApplication;
-  public createNestApplication(
     httpServer?: HttpServer,
     options?: NestApplicationOptions,
   ): INestApplication & INestExpressApplication;
+  public createNestApplication(
+    httpServer?: FastifyAdapter,
+    options?: NestApplicationOptions,
+  ): INestApplication & INestFastifyApplication;
   public createNestApplication(
     httpServer?: any,
     options?: NestApplicationOptions,
@@ -44,20 +46,26 @@ export class TestingModule extends NestApplicationContext {
     options?: NestApplicationOptions,
   ): INestApplication & (INestExpressApplication | INestFastifyApplication) {
     httpServer = this.applyExpressAdapter(httpServer);
+
+    this.applyLogger(options);
     this.container.setApplicationRef(httpServer);
+
     return new NestApplication(
       this.container,
       httpServer,
       this.applicationConfig,
+      options,
     );
   }
 
   public createNestMicroservice(
-    options: MicroserviceOptions,
+    options: NestMicroserviceOptions & MicroserviceOptions,
   ): INestMicroservice {
-    if (!NestMicroservice) {
-      throw new MicroservicesPackageNotFoundException();
-    }
+    const { NestMicroservice } = loadPackage(
+      '@nestjs/microservices',
+      'TestingModule',
+    );
+    this.applyLogger(options);
     return new NestMicroservice(
       this.container,
       options,
@@ -71,5 +79,12 @@ export class TestingModule extends NestApplicationContext {
       return httpAdapter;
     }
     return new ExpressAdapter(httpAdapter);
+  }
+
+  private applyLogger(options: NestApplicationContextOptions | undefined) {
+    if (!options || !options.logger) {
+      return undefined;
+    }
+    Logger.overrideLogger(options.logger);
   }
 }

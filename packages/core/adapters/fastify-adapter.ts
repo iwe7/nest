@@ -1,13 +1,9 @@
-import {
-  HttpServer,
-  RequestHandler,
-  ErrorHandler,
-} from '@nestjs/common/interfaces';
-import { Logger } from '@nestjs/common';
+import { RequestMethod } from '@nestjs/common';
+import { ErrorHandler, RequestHandler } from '@nestjs/common/interfaces';
 import { loadPackage } from '@nestjs/common/utils/load-package.util';
+import * as pathToRegexp from 'path-to-regexp';
 
 export class FastifyAdapter {
-  private readonly logger = new Logger(FastifyAdapter.name);
   protected readonly instance: any;
 
   constructor(options?: any) {
@@ -84,8 +80,12 @@ export class FastifyAdapter {
     return this.instance.setNotFoundHandler(handler);
   }
 
-  getHttpServer() {
-    return this.instance.server;
+  getHttpServer<T = any>(): T {
+    return this.instance.server as T;
+  }
+
+  getInstance<T = any>(): T {
+    return this.instance as T;
   }
 
   register(...args) {
@@ -129,5 +129,27 @@ export class FastifyAdapter {
 
   getRequestUrl(request): string {
     return request.raw.url;
+  }
+
+  createMiddlewareFactory(
+    requestMethod: RequestMethod,
+  ): (path: string, callback: Function) => any {
+    return (path: string, callback: Function) => {
+      const re = pathToRegexp(path);
+      const normalizedPath = path === '/*' ? '' : path;
+
+      this.instance.use(normalizedPath, (req, res, next) => {
+        if (!re.exec(req.originalUrl + '/')) {
+          return next();
+        }
+        if (
+          requestMethod === RequestMethod.ALL ||
+          req.method === RequestMethod[requestMethod]
+        ) {
+          return callback(req, res, next);
+        }
+        next();
+      });
+    };
   }
 }

@@ -1,13 +1,15 @@
-import { Type } from '@nestjs/common/interfaces/type.interface';
-import { SHARED_MODULE_METADATA } from '@nestjs/common/constants';
 import { DynamicModule } from '@nestjs/common';
+import { SHARED_MODULE_METADATA } from '@nestjs/common/constants';
+import { Type } from '@nestjs/common/interfaces/type.interface';
+import * as hash from 'object-hash';
+import stringify from 'fast-safe-stringify';
 
 export class ModuleTokenFactory {
   public create(
     metatype: Type<any>,
     scope: Type<any>[],
     dynamicModuleMetadata?: Partial<DynamicModule> | undefined,
-  ) {
+  ): string {
     const reflectedScope = this.reflectScope(metatype);
     const isSingleScoped = reflectedScope === true;
     const opaqueToken = {
@@ -15,13 +17,15 @@ export class ModuleTokenFactory {
       dynamic: this.getDynamicMetadataToken(dynamicModuleMetadata),
       scope: isSingleScoped ? this.getScopeStack(scope) : reflectedScope,
     };
-    return JSON.stringify(opaqueToken);
+    return hash(opaqueToken);
   }
 
   public getDynamicMetadataToken(
     dynamicModuleMetadata: Partial<DynamicModule> | undefined,
   ): string {
-    return dynamicModuleMetadata ? JSON.stringify(dynamicModuleMetadata) : '';
+    // Uses safeStringify instead of JSON.stringify
+    // to support circular dynamic modules
+    return dynamicModuleMetadata ? stringify(dynamicModuleMetadata) : '';
   }
 
   public getModuleName(metatype: Type<any>): string {
@@ -43,10 +47,7 @@ export class ModuleTokenFactory {
   }
 
   private reflectScope(metatype: Type<any>) {
-    const scope = Reflect.getMetadata(
-      SHARED_MODULE_METADATA,
-      metatype,
-    );
+    const scope = Reflect.getMetadata(SHARED_MODULE_METADATA, metatype);
     return scope ? scope : 'global';
   }
 }

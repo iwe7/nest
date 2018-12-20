@@ -1,10 +1,9 @@
-import 'reflect-metadata';
 import { expect } from 'chai';
-import { Catch } from '../../decorators/core/catch.decorator';
 import { FILTER_CATCH_EXCEPTIONS } from '../../constants';
+import { Catch } from '../../decorators/core/catch.decorator';
 
 describe('@Catch', () => {
-  const exceptions = ['exception', 'exception2'];
+  const exceptions: any = ['exception', 'exception2'];
 
   @Catch(...exceptions)
   class Test {}

@@ -1,4 +1,3 @@
-import 'reflect-metadata';
 import { Controller } from '@nestjs/common/interfaces/controllers/controller.interface';
 import { ListenerMetadataExplorer } from './listener-metadata-explorer';
 import { Server } from './server/server';
@@ -30,7 +29,7 @@ export class ListenersController {
         targetCallback,
         module,
       );
-      server.add(pattern, proxy);
+      server.addHandler(pattern, proxy);
     });
   }
 

@@ -1,7 +1,7 @@
-import { Transport } from '../enums/transport.enum';
-import { CustomTransportStrategy } from './custom-transport-strategy.interface';
-import { Server } from './../server/server';
 import { MqttClientOptions } from '@nestjs/common/interfaces/external/mqtt-options.interface';
+import { Transport } from '../enums/transport.enum';
+import { Server } from './../server/server';
+import { CustomTransportStrategy } from './custom-transport-strategy.interface';
 
 export type MicroserviceOptions =
   | GrpcOptions
@@ -9,6 +9,7 @@ export type MicroserviceOptions =
   | RedisOptions
   | NatsOptions
   | MqttOptions
+  | RmqOptions
   | CustomStrategy;
 
 export interface CustomStrategy {
@@ -23,6 +24,22 @@ export interface GrpcOptions {
     credentials?: any;
     protoPath: string;
     package: string;
+    protoLoader?: string;
+    /** @deprecated */
+    root?: string;
+    loader?: {
+      keepCase?: boolean;
+      alternateCommentMode?: boolean;
+      longs?: Function;
+      enums?: Function;
+      bytes?: Function;
+      defaults?: boolean;
+      arrays?: boolean;
+      objects?: boolean;
+      oneofs?: boolean;
+      json?: boolean;
+      includeDirs?: string[];
+    };
   };
 }
 
@@ -61,6 +78,20 @@ export interface NatsOptions {
     maxReconnectAttempts?: number;
     reconnectTimeWait?: number;
     servers?: string[];
+    reconnect?: boolean;
+    pedantic?: boolean;
     tls?: any;
+    queue?: string;
+  };
+}
+
+export interface RmqOptions {
+  transport?: Transport.RMQ;
+  options?: {
+    urls?: string[];
+    queue?: string;
+    prefetchCount?: number;
+    isGlobalPrefetchCount?: boolean;
+    queueOptions?: any;
   };
 }

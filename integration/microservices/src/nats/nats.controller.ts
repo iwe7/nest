@@ -1,12 +1,13 @@
-import { Controller, Get, Post, Body, Query, HttpCode } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post, Query } from '@nestjs/common';
 import {
   Client,
-  MessagePattern,
   ClientProxy,
+  MessagePattern,
+  RpcException,
   Transport,
 } from '@nestjs/microservices';
-import { Observable, of, from } from 'rxjs';
-import { scan } from 'rxjs/operators';
+import { from, Observable, of, throwError } from 'rxjs';
+import { catchError, scan } from 'rxjs/operators';
 
 @Controller()
 export class NatsController {
@@ -20,15 +21,19 @@ export class NatsController {
 
   @Post()
   @HttpCode(200)
-  call(@Query('command') cmd, @Body() data: number[]): Observable<number> {
-    return this.client.send<number>({ cmd }, data);
+  async call(
+    @Query('command') cmd,
+    @Body() data: number[],
+  ): Promise<Observable<number>> {
+    await this.client.connect();
+    return this.client.send<number>(cmd, data);
   }
 
   @Post('stream')
   @HttpCode(200)
   stream(@Body() data: number[]): Observable<number> {
     return this.client
-      .send<number>({ cmd: 'streaming' }, data)
+      .send<number>('streaming.sum', data)
       .pipe(scan((a, b) => a + b));
   }
 
@@ -38,7 +43,7 @@ export class NatsController {
     const send = async (tab: number[]) => {
       const expected = tab.reduce((a, b) => a + b);
       const result = await this.client
-        .send<number>({ cmd: 'sum' }, tab)
+        .send<number>('math.sum', tab)
         .toPromise();
 
       return result === expected;
@@ -48,23 +53,35 @@ export class NatsController {
       .reduce(async (a, b) => (await a) && (await b));
   }
 
-  @MessagePattern({ cmd: 'sum' })
+  @MessagePattern('math.*')
   sum(data: number[]): number {
     return (data || []).reduce((a, b) => a + b);
   }
 
-  @MessagePattern({ cmd: 'asyncSum' })
+  @MessagePattern('async.*')
   async asyncSum(data: number[]): Promise<number> {
     return (data || []).reduce((a, b) => a + b);
   }
 
-  @MessagePattern({ cmd: 'streamSum' })
+  @MessagePattern('stream.*')
   streamSum(data: number[]): Observable<number> {
     return of((data || []).reduce((a, b) => a + b));
   }
 
-  @MessagePattern({ cmd: 'streaming' })
+  @MessagePattern('streaming.*')
   streaming(data: number[]): Observable<number> {
     return from(data);
+  }
+
+  @Get('exception')
+  async getError() {
+    return await this.client
+      .send<number>('exception', {})
+      .pipe(catchError(err => of(err)));
+  }
+
+  @MessagePattern('exception')
+  throwError(): Observable<number> {
+    return throwError(new RpcException('test'));
   }
 }

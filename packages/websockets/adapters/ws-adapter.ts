@@ -1,23 +1,37 @@
-import { Server } from 'http';
-import { MessageMappingProperties } from '../gateway-metadata-explorer';
 import {
-  CONNECTION_EVENT,
-  DISCONNECT_EVENT,
-  CLOSE_EVENT,
-  ERROR_EVENT,
-} from '../constants';
-import { WebSocketAdapter, Logger } from '@nestjs/common';
-import { Observable, fromEvent, EMPTY as empty } from 'rxjs';
-import { mergeMap, filter, tap } from 'rxjs/operators';
-import { isFunction } from '@nestjs/common/utils/shared.utils';
+  INestApplicationContext,
+  Logger,
+  WebSocketAdapter,
+} from '@nestjs/common';
 import { loadPackage } from '@nestjs/common/utils/load-package.util';
+import { isFunction } from '@nestjs/common/utils/shared.utils';
+import { NestApplication } from '@nestjs/core';
+import { Server } from 'http';
+import { EMPTY as empty, fromEvent, Observable } from 'rxjs';
+import { filter, first, mergeMap, share, takeUntil } from 'rxjs/operators';
+import { CLOSE_EVENT, CONNECTION_EVENT, ERROR_EVENT } from '../constants';
+import { MessageMappingProperties } from '../gateway-metadata-explorer';
 
 let wsPackage: any = {};
 
+enum READY_STATE {
+  CONNECTING_STATE = 0,
+  OPEN_STATE = 1,
+  CLOSING_STATE = 2,
+  CLOSED_STATE = 3,
+}
+
 export class WsAdapter implements WebSocketAdapter {
-  private readonly logger = new Logger(WsAdapter.name);
-  constructor(private readonly httpServer: Server | null = null) {
+  protected readonly logger = new Logger(WsAdapter.name);
+  protected readonly httpServer: Server;
+
+  constructor(appOrHttpServer?: INestApplicationContext | Server) {
     wsPackage = loadPackage('ws', 'WsAdapter');
+    if (appOrHttpServer && appOrHttpServer instanceof NestApplication) {
+      this.httpServer = appOrHttpServer.getUnderlyingHttpServer();
+    } else {
+      this.httpServer = appOrHttpServer as Server;
+    }
   }
 
   public create(
@@ -52,39 +66,53 @@ export class WsAdapter implements WebSocketAdapter {
   }
 
   public bindMessageHandlers(
-    client: WebSocket,
+    client: any,
     handlers: MessageMappingProperties[],
-    process: (data: any) => Observable<any>,
+    transform: (data: any) => Observable<any>,
   ) {
-    fromEvent(client, 'message')
-      .pipe(
-        mergeMap(data => this.bindMessageHandler(data, handlers, process)),
-        filter(result => !!result),
-      )
-      .subscribe(response => client.send(JSON.stringify(response)));
+    const close$ = fromEvent(client, CLOSE_EVENT).pipe(share(), first());
+    const source$ = fromEvent(client, 'message').pipe(
+      mergeMap(data =>
+        this.bindMessageHandler(data, handlers, transform).pipe(
+          filter(result => result),
+        ),
+      ),
+      takeUntil(close$),
+    );
+    const handleMessage = response => {
+      if (client.readyState !== READY_STATE.OPEN_STATE) {
+        return;
+      }
+      client.send(JSON.stringify(response));
+    };
+    source$.subscribe(handleMessage);
   }
 
   public bindMessageHandler(
     buffer,
     handlers: MessageMappingProperties[],
-    process: (data: any) => Observable<any>,
+    transform: (data: any) => Observable<any>,
   ): Observable<any> {
-    const message = JSON.parse(buffer.data);
-    const messageHandler = handlers.find(
-      handler => handler.message === message.event,
-    );
-    if (!messageHandler) {
+    try {
+      const message = JSON.parse(buffer.data);
+      const messageHandler = handlers.find(
+        handler => handler.message === message.event,
+      );
+      const { callback } = messageHandler;
+      return transform(callback(message.data));
+    } catch {
       return empty;
     }
-    const { callback } = messageHandler;
-    return process(callback(message.data));
   }
 
-  public close(server) {
-    isFunction(server.close) && server.close();
+  public close(server: any) {
+    server && isFunction(server.close) && server.close();
   }
 
-  public bindErrorHandler(server) {
+  public bindErrorHandler(server: any) {
+    server.on(CONNECTION_EVENT, ws =>
+      ws.on(ERROR_EVENT, err => this.logger.error(err)),
+    );
     server.on(ERROR_EVENT, err => this.logger.error(err));
     return server;
   }

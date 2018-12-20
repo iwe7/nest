@@ -1,50 +1,42 @@
-import * as cors from 'cors';
-import * as http from 'http';
-import * as https from 'https';
-import * as optional from 'optional';
-import * as bodyParser from 'body-parser';
-import iterate from 'iterare';
 import {
   CanActivate,
   ExceptionFilter,
+  INestApplication,
+  INestMicroservice,
   NestInterceptor,
-  OnModuleDestroy,
   PipeTransform,
   WebSocketAdapter,
 } from '@nestjs/common';
-import {
-  INestApplication,
-  INestMicroservice,
-  OnModuleInit,
-} from '@nestjs/common';
-import { Logger } from '@nestjs/common/services/logger.service';
-import {
-  isNil,
-  isUndefined,
-  validatePath,
-  isFunction,
-  isObject,
-} from '@nestjs/common/utils/shared.utils';
-import { MicroserviceOptions } from '@nestjs/common/interfaces/microservices/microservice-configuration.interface';
-import { ApplicationConfig } from './application-config';
-import { messages } from './constants';
-import { NestContainer } from './injector/container';
-import { Module } from './injector/module';
-import { MiddlewareModule } from './middleware/middleware-module';
-import { Resolver } from './router/interfaces/resolver.interface';
-import { RoutesResolver } from './router/routes-resolver';
-import { MiddlewareContainer } from './middleware/container';
-import { NestApplicationContext } from './nest-application-context';
-import { HttpsOptions } from '@nestjs/common/interfaces/external/https-options.interface';
-import { NestApplicationOptions } from '@nestjs/common/interfaces/nest-application-options.interface';
-import { CorsOptions } from '@nestjs/common/interfaces/external/cors-options.interface';
 import { HttpServer } from '@nestjs/common/interfaces';
-import { ExpressAdapter } from './adapters/express-adapter';
-import { FastifyAdapter } from './adapters/fastify-adapter';
+import { CorsOptions } from '@nestjs/common/interfaces/external/cors-options.interface';
+import { ServeStaticOptions } from '@nestjs/common/interfaces/external/serve-static-options.interface';
+import { MicroserviceOptions } from '@nestjs/common/interfaces/microservices/microservice-configuration.interface';
+import { NestApplicationOptions } from '@nestjs/common/interfaces/nest-application-options.interface';
 import { INestExpressApplication } from '@nestjs/common/interfaces/nest-express-application.interface';
 import { INestFastifyApplication } from '@nestjs/common/interfaces/nest-fastify-application.interface';
-import { ServeStaticOptions } from '@nestjs/common/interfaces/external/serve-static-options.interface';
+import { Logger } from '@nestjs/common/services/logger.service';
 import { loadPackage } from '@nestjs/common/utils/load-package.util';
+import {
+  isFunction,
+  isObject,
+  validatePath,
+} from '@nestjs/common/utils/shared.utils';
+import * as bodyParser from 'body-parser';
+import * as cors from 'cors';
+import * as http from 'http';
+import * as https from 'https';
+import iterate from 'iterare';
+import * as optional from 'optional';
+import { ExpressAdapter } from './adapters/express-adapter';
+import { FastifyAdapter } from './adapters/fastify-adapter';
+import { ApplicationConfig } from './application-config';
+import { MESSAGES } from './constants';
+import { NestContainer } from './injector/container';
+import { MiddlewareContainer } from './middleware/container';
+import { MiddlewareModule } from './middleware/middleware-module';
+import { NestApplicationContext } from './nest-application-context';
+import { Resolver } from './router/interfaces/resolver.interface';
+import { RoutesResolver } from './router/routes-resolver';
 
 const { SocketModule } =
   optional('@nestjs/websockets/socket-module') || ({} as any);
@@ -84,6 +76,10 @@ export class NestApplication extends NestApplicationContext
     this.routesResolver = new RoutesResolver(this.container, this.config);
   }
 
+  public getHttpAdapter(): HttpServer {
+    return this.httpAdapter;
+  }
+
   public registerHttpServer() {
     this.httpServer = this.createServer();
 
@@ -108,13 +104,17 @@ export class NestApplication extends NestApplicationContext
     const isExpress = this.isExpress();
 
     if (isHttpsEnabled && isExpress) {
-      return https.createServer(
+      const server = https.createServer(
         this.appOptions.httpsOptions,
-        this.httpAdapter.getHttpServer(),
+        this.httpAdapter.getInstance(),
       );
+      (this.httpAdapter as ExpressAdapter).setHttpServer(server);
+      return server;
     }
     if (isExpress) {
-      return http.createServer(this.httpAdapter.getHttpServer());
+      const server = http.createServer(this.httpAdapter.getInstance());
+      (this.httpAdapter as ExpressAdapter).setHttpServer(server);
+      return server;
     }
     return this.httpAdapter;
   }
@@ -148,9 +148,11 @@ export class NestApplication extends NestApplicationContext
     await this.registerModules();
     await this.registerRouter();
     await this.callInitHook();
+    await this.registerRouterHooks();
+    await this.callBootstrapHook();
 
     this.isInitialized = true;
-    this.logger.log(messages.APPLICATION_READY);
+    this.logger.log(MESSAGES.APPLICATION_READY);
     return this;
   }
 
@@ -173,22 +175,27 @@ export class NestApplication extends NestApplicationContext
   }
 
   public isMiddlewareApplied(httpAdapter: HttpServer, name: string): boolean {
-    const app = this.httpAdapter.getHttpServer();
+    const app = httpAdapter.getInstance();
     return (
       !!app._router &&
       !!app._router.stack &&
       isFunction(app._router.stack.filter) &&
-      !!app._router.stack.filter(
+      app._router.stack.some(
         layer => layer && layer.handle && layer.handle.name === name,
-      ).length
+      )
     );
   }
 
   public async registerRouter() {
     await this.registerMiddleware(this.httpAdapter);
     const prefix = this.config.getGlobalPrefix();
-    const basePath = prefix ? validatePath(prefix) : '';
+    const basePath = validatePath(prefix);
     this.routesResolver.resolve(this.httpAdapter, basePath);
+  }
+
+  public async registerRouterHooks() {
+    this.routesResolver.registerNotFoundHandler();
+    this.routesResolver.registerExceptionHandler();
   }
 
   public connectMicroservice(options: MicroserviceOptions): INestMicroservice {
@@ -199,8 +206,8 @@ export class NestApplication extends NestApplicationContext
 
     const applicationConfig = new ApplicationConfig();
     const instance = new NestMicroservice(
-      this.container as any,
-      options as any,
+      this.container,
+      options,
       applicationConfig,
     );
     instance.registerListeners();
@@ -279,7 +286,7 @@ export class NestApplication extends NestApplicationContext
   }
 
   public enableCors(options?: CorsOptions): this {
-    this.httpAdapter.use(cors(options));
+    this.httpAdapter.use(cors(options) as any);
     return this;
   }
 
@@ -312,7 +319,7 @@ export class NestApplication extends NestApplicationContext
         await microservice.close();
       }),
     );
-    await this.callDestroyHook();
+    await super.close();
   }
 
   public setGlobalPrefix(prefix: string): this {
@@ -390,32 +397,5 @@ export class NestApplication extends NestApplicationContext
     return new Promise(async (resolve, reject) => {
       await microservice.listen(resolve);
     });
-  }
-
-  private async callDestroyHook(): Promise<any> {
-    const modules = this.container.getModules();
-    await Promise.all(
-      iterate(modules.values()).map(
-        async module => await this.callModuleDestroyHook(module),
-      ),
-    );
-  }
-
-  private async callModuleDestroyHook(module: Module): Promise<any> {
-    const components = [...module.routes, ...module.components];
-    await Promise.all(
-      iterate(components)
-        .map(([key, { instance }]) => instance)
-        .filter(instance => !isNil(instance))
-        .filter(this.hasOnModuleDestroyHook)
-        .map(
-          async instance =>
-            await (instance as OnModuleDestroy).onModuleDestroy(),
-        ),
-    );
-  }
-
-  private hasOnModuleDestroyHook(instance): instance is OnModuleDestroy {
-    return !isUndefined((instance as OnModuleDestroy).onModuleDestroy);
   }
 }

@@ -1,33 +1,45 @@
-import { ClientProxy } from './client-proxy';
 import { Logger } from '@nestjs/common/services/logger.service';
-import { ClientOptions } from '../interfaces/client-metadata.interface';
-import { GrpcOptions } from './../interfaces';
-import { GRPC_DEFAULT_URL } from './../constants';
-import { ClientGrpc } from './../interfaces';
-import { Observable } from 'rxjs';
-import { InvalidGrpcServiceException } from '../exceptions/invalid-grpc-service.exception';
-import { InvalidGrpcPackageException } from '../exceptions/invalid-grpc-package.exception';
-import { InvalidProtoDefinitionException } from '../exceptions/invalid-proto-definition.exception';
 import { loadPackage } from '@nestjs/common/utils/load-package.util';
+import { isObject } from '@nestjs/common/utils/shared.utils';
+import { Observable } from 'rxjs';
+import { GRPC_DEFAULT_PROTO_LOADER, GRPC_DEFAULT_URL } from '../constants';
+import { InvalidGrpcPackageException } from '../exceptions/errors/invalid-grpc-package.exception';
+import { InvalidGrpcServiceException } from '../exceptions/errors/invalid-grpc-service.exception';
+import { InvalidProtoDefinitionException } from '../exceptions/errors/invalid-proto-definition.exception';
+import { ClientGrpc, GrpcOptions } from '../interfaces';
+import { ClientOptions } from '../interfaces/client-metadata.interface';
+import { ClientProxy } from './client-proxy';
+import { GRPC_CANCELLED } from './constants';
 
 let grpcPackage: any = {};
+let grpcProtoLoaderPackage: any = {};
 
 export class ClientGrpcProxy extends ClientProxy implements ClientGrpc {
-  private readonly logger = new Logger(ClientProxy.name);
-  private readonly url: string;
-  private grpcClient: any;
+  protected readonly logger = new Logger(ClientProxy.name);
+  protected readonly url: string;
+  protected grpcClient: any;
 
-  constructor(private readonly options: ClientOptions) {
+  constructor(protected readonly options: ClientOptions['options']) {
     super();
     this.url =
       this.getOptionsProp<GrpcOptions>(options, 'url') || GRPC_DEFAULT_URL;
 
+    const protoLoader =
+      this.getOptionsProp<GrpcOptions>(options, 'protoLoader') || GRPC_DEFAULT_PROTO_LOADER;
+
     grpcPackage = loadPackage('grpc', ClientGrpcProxy.name);
+    grpcProtoLoaderPackage = loadPackage(
+      protoLoader,
+      ClientGrpcProxy.name,
+    );
     this.grpcClient = this.createClient();
   }
 
-  public getService<T = any>(name: string): T {
-    const { options } = this.options as GrpcOptions;
+  public getService<T extends {}>(name: string): T {
+    const options: any = isObject(this.options)
+      ? { ...this.options, loader: '' }
+      : {};
+
     if (!this.grpcClient[name]) {
       throw new InvalidGrpcServiceException();
     }
@@ -60,10 +72,30 @@ export class ClientGrpcProxy extends ClientProxy implements ClientGrpc {
   ): (...args) => Observable<any> {
     return (...args) => {
       return new Observable(observer => {
+        let isClientCanceled = false;
         const call = client[methodName](...args);
+
         call.on('data', (data: any) => observer.next(data));
-        call.on('error', (error: any) => observer.error(error));
-        call.on('end', () => observer.complete());
+        call.on('error', (error: any) => {
+          if (error.details === GRPC_CANCELLED) {
+            call.destroy();
+            if (isClientCanceled) {
+              return;
+            }
+          }
+          observer.error(error);
+        });
+        call.on('end', () => {
+          call.removeAllListeners();
+          observer.complete();
+        });
+        return () => {
+          if (call.finished) {
+            return undefined;
+          }
+          isClientCanceled = true;
+          call.cancel();
+        };
       });
     };
   }
@@ -93,19 +125,30 @@ export class ClientGrpcProxy extends ClientProxy implements ClientGrpc {
     );
     const grpcPkg = this.lookupPackage(grpcContext, packageName);
     if (!grpcPkg) {
-      throw new InvalidGrpcPackageException();
+      const invalidPackageError = new InvalidGrpcPackageException();
+      this.logger.error(invalidPackageError.message, invalidPackageError.stack);
+      throw invalidPackageError;
     }
     return grpcPkg;
   }
 
   public loadProto(): any {
     try {
-      const context = grpcPackage.load(
-        this.getOptionsProp<GrpcOptions>(this.options, 'protoPath'),
+      const file = this.getOptionsProp<GrpcOptions>(this.options, 'protoPath');
+      const loader = this.getOptionsProp<GrpcOptions>(this.options, 'loader');
+
+      const packageDefinition = grpcProtoLoaderPackage.loadSync(file, loader);
+      const packageObject = grpcPackage.loadPackageDefinition(
+        packageDefinition,
       );
-      return context;
-    } catch (e) {
-      throw new InvalidProtoDefinitionException();
+      return packageObject;
+    } catch (err) {
+      const invalidProtoError = new InvalidProtoDefinitionException();
+      const message =
+        err && err.message ? err.message : invalidProtoError.message;
+
+      this.logger.error(message, invalidProtoError.stack);
+      throw invalidProtoError;
     }
   }
 
@@ -123,7 +166,20 @@ export class ClientGrpcProxy extends ClientProxy implements ClientGrpc {
     this.grpcClient = null;
   }
 
-  protected async publish(partialPacket, callback: (packet) => any) {
+  public async connect(): Promise<any> {
+    throw new Error('The "connect()" method is not supported in gRPC mode.');
+  }
+
+  public send<TResult = any, TInput = any>(
+    pattern: any,
+    data: TInput,
+  ): Observable<TResult> {
+    throw new Error(
+      'Method is not supported in gRPC mode. Use ClientGrpc instead (learn more in the documentation).',
+    );
+  }
+
+  protected publish(partialPacket, callback: (packet) => any) {
     throw new Error(
       'Method is not supported in gRPC mode. Use ClientGrpc instead (learn more in the documentation).',
     );

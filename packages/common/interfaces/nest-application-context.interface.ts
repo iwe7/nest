@@ -1,5 +1,5 @@
-import { Type } from './type.interface';
 import { LoggerService } from '../services/logger.service';
+import { Type } from './type.interface';
 
 export interface INestApplicationContext {
   /**
@@ -10,10 +10,22 @@ export interface INestApplicationContext {
 
   /**
    * Retrieves an instance of either injectable or controller available anywhere, otherwise, throws exception.
-   * @returns {T}
+   * @returns {TResult}
    */
-  get<T>(
-    typeOrToken: Type<T> | string | symbol,
+  get<TInput = any, TResult = TInput>(
+    typeOrToken: Type<TInput> | string | symbol,
     options?: { strict: boolean },
-  ): T;
+  ): TResult;
+
+  /**
+   * Terminates the application
+   * @returns {Promise<void>}
+   */
+  close(): Promise<void>;
+
+  /**
+   * Sets custom logger service
+   * @returns {void}
+   */
+  useLogger(logger: LoggerService);
 }

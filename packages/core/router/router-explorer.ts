@@ -1,26 +1,32 @@
-import 'reflect-metadata';
-import { Controller } from '@nestjs/common/interfaces/controllers/controller.interface';
+import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { RequestMethod } from '@nestjs/common/enums/request-method.enum';
-import { RouterProxy, RouterProxyCallback } from './router-proxy';
-import { UnknownRequestMappingException } from '../errors/exceptions/unknown-request-mapping.exception';
+import { Controller } from '@nestjs/common/interfaces/controllers/controller.interface';
 import { Type } from '@nestjs/common/interfaces/type.interface';
-import { isUndefined, validatePath } from '@nestjs/common/utils/shared.utils';
-import { RouterMethodFactory } from '../helpers/router-method-factory';
-import { PATH_METADATA, METHOD_METADATA } from '@nestjs/common/constants';
 import { Logger } from '@nestjs/common/services/logger.service';
-import { routeMappedMessage } from '../helpers/messages';
-import { RouterExecutionContext } from './router-execution-context';
+import { isUndefined, validatePath } from '@nestjs/common/utils/shared.utils';
+import { ApplicationConfig } from '../application-config';
+import { UnknownRequestMappingException } from '../errors/exceptions/unknown-request-mapping.exception';
+import { GuardsConsumer } from '../guards/guards-consumer';
+import { GuardsContextCreator } from '../guards/guards-context-creator';
+import { ROUTE_MAPPED_MESSAGE } from '../helpers/messages';
+import { RouterMethodFactory } from '../helpers/router-method-factory';
+import { NestContainer } from '../injector/container';
+import { InterceptorsConsumer } from '../interceptors/interceptors-consumer';
+import { InterceptorsContextCreator } from '../interceptors/interceptors-context-creator';
+import { MetadataScanner } from '../metadata-scanner';
+import { PipesConsumer } from '../pipes/pipes-consumer';
+import { PipesContextCreator } from '../pipes/pipes-context-creator';
 import { ExceptionsFilter } from './interfaces/exceptions-filter.interface';
 import { RouteParamsFactory } from './route-params-factory';
-import { MetadataScanner } from '../metadata-scanner';
-import { ApplicationConfig } from './../application-config';
-import { PipesContextCreator } from './../pipes/pipes-context-creator';
-import { PipesConsumer } from './../pipes/pipes-consumer';
-import { NestContainer } from '../injector/container';
-import { GuardsContextCreator } from '../guards/guards-context-creator';
-import { GuardsConsumer } from '../guards/guards-consumer';
-import { InterceptorsContextCreator } from '../interceptors/interceptors-context-creator';
-import { InterceptorsConsumer } from '../interceptors/interceptors-consumer';
+import { RouterExecutionContext } from './router-execution-context';
+import { RouterProxy, RouterProxyCallback } from './router-proxy';
+
+export interface RoutePathProperties {
+  path: string;
+  requestMethod: RequestMethod;
+  targetCallback: RouterProxyCallback;
+  methodName: string;
+}
 
 export class RouterExplorer {
   private readonly executionContextCreator: RouterExecutionContext;
@@ -120,7 +126,7 @@ export class RouterExplorer {
     module: string,
     basePath: string,
   ) {
-    (routePaths || []).map(pathProperties => {
+    (routePaths || []).forEach(pathProperties => {
       const { path, requestMethod } = pathProperties;
       this.applyCallbackToRouter(
         router,
@@ -129,7 +135,7 @@ export class RouterExplorer {
         module,
         basePath,
       );
-      this.logger.log(routeMappedMessage(path, requestMethod));
+      this.logger.log(ROUTE_MAPPED_MESSAGE(path, requestMethod));
     });
   }
 
@@ -179,11 +185,4 @@ export class RouterExplorer {
     );
     return this.routerProxy.createProxy(executionContext, exceptionFilter);
   }
-}
-
-export interface RoutePathProperties {
-  path: string;
-  requestMethod: RequestMethod;
-  targetCallback: RouterProxyCallback;
-  methodName: string;
 }

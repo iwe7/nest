@@ -1,18 +1,16 @@
-import 'reflect-metadata';
-import { Controller } from '@nestjs/common/interfaces';
+import { DynamicModule } from '@nestjs/common';
 import { GLOBAL_MODULE_METADATA } from '@nestjs/common/constants';
 import { Type } from '@nestjs/common/interfaces/type.interface';
-import { SHARED_MODULE_METADATA } from '@nestjs/common/constants';
-import { isUndefined } from '@nestjs/common/utils/shared.utils';
-import { Module } from './module';
+import { ApplicationConfig } from '../application-config';
+import { CircularDependencyException } from '../errors/exceptions/circular-dependency.exception';
+import { InvalidModuleException } from '../errors/exceptions/invalid-module.exception';
 import { UnknownModuleException } from '../errors/exceptions/unknown-module.exception';
-import { ModuleTokenFactory } from './module-token-factory';
-import { InvalidModuleException } from './../errors/exceptions/invalid-module.exception';
-import { DynamicModule } from '@nestjs/common';
-import { ModulesContainer } from './modules-container';
-import { NestApplicationContext } from './../nest-application-context';
-import { ApplicationConfig } from './../application-config';
+import { ApplicationReferenceHost } from '../helpers/application-ref-host';
+import { ExternalContextCreator } from '../helpers/external-context-creator';
+import { Reflector } from '../services';
 import { ModuleCompiler } from './compiler';
+import { Module } from './module';
+import { ModulesContainer } from './modules-container';
 
 export class NestContainer {
   private readonly globalModules = new Set<Module>();
@@ -22,6 +20,10 @@ export class NestContainer {
     string,
     Partial<DynamicModule>
   >();
+  private readonly reflector = new Reflector();
+  private readonly applicationRefHost = new ApplicationReferenceHost();
+  private externalContextCreator: ExternalContextCreator;
+  private modulesContainer: ModulesContainer;
   private applicationRef: any;
 
   constructor(
@@ -34,17 +36,25 @@ export class NestContainer {
 
   public setApplicationRef(applicationRef: any) {
     this.applicationRef = applicationRef;
+
+    if (!this.applicationRefHost) {
+      return;
+    }
+    this.applicationRefHost.applicationRef = applicationRef;
   }
 
   public getApplicationRef() {
     return this.applicationRef;
   }
 
-  public addModule(metatype: Type<any> | DynamicModule, scope: Type<any>[]) {
+  public async addModule(
+    metatype: Type<any> | DynamicModule | Promise<DynamicModule>,
+    scope: Type<any>[],
+  ) {
     if (!metatype) {
       throw new InvalidModuleException(scope);
     }
-    const { type, dynamicMetadata, token } = this.moduleCompiler.compile(
+    const { type, dynamicMetadata, token } = await this.moduleCompiler.compile(
       metatype,
       scope,
     );
@@ -77,7 +87,7 @@ export class NestContainer {
     if (!modules) {
       return undefined;
     }
-    modules.map(module => this.addModule(module, scope));
+    modules.forEach(module => this.addModule(module, scope));
   }
 
   public isGlobalModule(metatype: Type<any>): boolean {
@@ -92,7 +102,7 @@ export class NestContainer {
     return this.modules;
   }
 
-  public addRelatedModule(
+  public async addRelatedModule(
     relatedModule: Type<any> | DynamicModule,
     token: string,
   ) {
@@ -102,16 +112,18 @@ export class NestContainer {
     const parent = module.metatype;
 
     const scope = [].concat(module.scope, parent);
-    const {
-      type,
-      dynamicMetadata,
-      token: relatedModuleToken,
-    } = this.moduleCompiler.compile(relatedModule, scope);
+    const { token: relatedModuleToken } = await this.moduleCompiler.compile(
+      relatedModule,
+      scope,
+    );
     const related = this.modules.get(relatedModuleToken);
     module.addRelatedModule(related);
   }
 
   public addComponent(component: Type<any>, token: string): string {
+    if (!component) {
+      throw new CircularDependencyException();
+    }
     if (!this.modules.has(token)) {
       throw new UnknownModuleException();
     }
@@ -179,6 +191,28 @@ export class NestContainer {
       return metadata[metadataKey] as any[];
     }
     return [];
+  }
+
+  public getReflector(): Reflector {
+    return this.reflector;
+  }
+
+  public getExternalContextCreator(): ExternalContextCreator {
+    if (!this.externalContextCreator) {
+      this.externalContextCreator = ExternalContextCreator.fromContainer(this);
+    }
+    return this.externalContextCreator;
+  }
+
+  public getApplicationRefHost(): ApplicationReferenceHost {
+    return this.applicationRefHost;
+  }
+
+  public getModulesContainer(): ModulesContainer {
+    if (!this.modulesContainer) {
+      this.modulesContainer = this.getModules();
+    }
+    return this.modulesContainer;
   }
 }
 

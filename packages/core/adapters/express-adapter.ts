@@ -1,13 +1,14 @@
-import * as express from 'express';
-import {
-  HttpServer,
-  RequestHandler,
-  ErrorHandler,
-} from '@nestjs/common/interfaces';
-import { isNil, isObject } from '@nestjs/common/utils/shared.utils';
+import { RequestMethod } from '@nestjs/common';
+import { HttpServer, RequestHandler } from '@nestjs/common/interfaces';
 import { ServeStaticOptions } from '@nestjs/common/interfaces/external/serve-static-options.interface';
+import { isNil, isObject } from '@nestjs/common/utils/shared.utils';
+import * as express from 'express';
+import { RouterMethodFactory } from '../helpers/router-method-factory';
 
 export class ExpressAdapter implements HttpServer {
+  private readonly routerMethodFactory = new RouterMethodFactory();
+  private httpServer = null;
+
   constructor(private readonly instance) {}
 
   use(...args: any[]) {
@@ -75,19 +76,27 @@ export class ExpressAdapter implements HttpServer {
   }
 
   setErrorHandler(handler: Function) {
-    return this.use(handler as any);
+    return this.use(handler);
   }
 
   setNotFoundHandler(handler: Function) {
-    return this.use(handler as any);
+    return this.use(handler);
   }
 
   setHeader(response, name: string, value: string) {
     return response.set(name, value);
   }
 
-  getHttpServer() {
-    return this.instance;
+  getHttpServer<T = any>(): T {
+    return this.httpServer as T;
+  }
+
+  setHttpServer(httpServer) {
+    this.httpServer = httpServer;
+  }
+
+  getInstance<T = any>(): T {
+    return this.instance as T;
   }
 
   close() {
@@ -99,18 +108,21 @@ export class ExpressAdapter implements HttpServer {
   }
 
   enable(...args) {
-    return this.instance.set(...args);
+    return this.instance.enable(...args);
   }
 
   disable(...args) {
-    return this.instance.set(...args);
+    return this.instance.disable(...args);
   }
 
   engine(...args) {
-    return this.instance.set(...args);
+    return this.instance.engine(...args);
   }
 
   useStaticAssets(path: string, options: ServeStaticOptions) {
+    if (options && options.prefix) {
+      return this.use(options.prefix, express.static(path, options));
+    }
     return this.use(express.static(path, options));
   }
 
@@ -128,5 +140,13 @@ export class ExpressAdapter implements HttpServer {
 
   getRequestUrl(request): string {
     return request.url;
+  }
+
+  createMiddlewareFactory(
+    requestMethod: RequestMethod,
+  ): (path: string, callback: Function) => any {
+    return this.routerMethodFactory
+      .get(this.instance, requestMethod)
+      .bind(this.instance);
   }
 }

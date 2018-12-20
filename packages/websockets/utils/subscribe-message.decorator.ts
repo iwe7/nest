@@ -1,6 +1,4 @@
-import 'reflect-metadata';
 import { MESSAGE_MAPPING_METADATA, MESSAGE_METADATA } from '../constants';
-import { isObject, isUndefined } from '@nestjs/common/utils/shared.utils';
 
 /**
  * Subscribes to messages that fulfils chosen pattern.

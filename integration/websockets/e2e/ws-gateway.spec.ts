@@ -1,24 +1,24 @@
-import * as WebSocket from 'ws';
-import { expect } from 'chai';
-import { Test, TestingModuleBuilder } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
-import { ApplicationGateway } from '../src/app.gateway';
-import { ServerGateway } from '../src/server.gateway';
-import { NamespaceGateway } from '../src/namespace.gateway';
+import { Test } from '@nestjs/testing';
 import { WsAdapter } from '@nestjs/websockets/adapters/ws-adapter';
+import { expect } from 'chai';
+import * as WebSocket from 'ws';
+import { ApplicationGateway } from '../src/app.gateway';
+import { CoreGateway } from '../src/core.gateway';
+import { ServerGateway } from '../src/server.gateway';
 
 async function createNestApp(...gateways): Promise<INestApplication> {
   const testingModule = await Test.createTestingModule({
     providers: gateways,
   }).compile();
   const app = await testingModule.createNestApplication();
-  app.useWebSocketAdapter(new WsAdapter(app.getHttpServer()));
+  app.useWebSocketAdapter(new WsAdapter(app));
   return app;
 }
 
 describe('WebSocketGateway (WsAdapter)', () => {
   const event = 'push';
-  let ws, app;
+  let ws, ws2, app;
 
   it(`should handle message (2nd port)`, async () => {
     app = await createNestApp(ApplicationGateway);
@@ -27,9 +27,14 @@ describe('WebSocketGateway (WsAdapter)', () => {
     ws = new WebSocket('ws://localhost:8080');
     await new Promise(resolve => ws.on('open', resolve));
 
-    ws.send(JSON.stringify({ event: 'push', data: {
-      test: 'test',
-    }}));
+    ws.send(
+      JSON.stringify({
+        event: 'push',
+        data: {
+          test: 'test',
+        },
+      }),
+    );
     await new Promise(resolve =>
       ws.on('message', data => {
         expect(JSON.parse(data).data.test).to.be.eql('test');
@@ -45,15 +50,60 @@ describe('WebSocketGateway (WsAdapter)', () => {
     ws = new WebSocket('ws://localhost:3000');
     await new Promise(resolve => ws.on('open', resolve));
 
-    ws.send(JSON.stringify({ event: 'push', data: {
-      test: 'test',
-    }}));
+    ws.send(
+      JSON.stringify({
+        event: 'push',
+        data: {
+          test: 'test',
+        },
+      }),
+    );
     await new Promise(resolve =>
       ws.on('message', data => {
         expect(JSON.parse(data).data.test).to.be.eql('test');
         resolve();
       }),
     );
+  });
+
+  it(`should support 2 different gateways`, async () => {
+    app = await createNestApp(ApplicationGateway, CoreGateway);
+    await app.listenAsync(3000);
+
+    ws = new WebSocket('ws://localhost:8080');
+    ws2 = new WebSocket('ws://localhost:8090');
+
+    await new Promise(resolve =>
+      ws.on('open', () => {
+        ws.on('message', data => {
+          expect(JSON.parse(data).data.test).to.be.eql('test');
+          resolve();
+        });
+        ws.send(
+          JSON.stringify({
+            event: 'push',
+            data: {
+              test: 'test',
+            },
+          }),
+        );
+      }),
+    );
+
+    await new Promise(resolve => {
+      ws2.on('message', data => {
+        expect(JSON.parse(data).data.test).to.be.eql('test');
+        resolve();
+      });
+      ws2.send(
+        JSON.stringify({
+          event: 'push',
+          data: {
+            test: 'test',
+          },
+        }),
+      );
+    });
   });
 
   afterEach(() => app.close());

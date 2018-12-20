@@ -1,17 +1,18 @@
-import * as deprecate from 'deprecate';
-import { InstanceLoader } from '@nestjs/core/injector/instance-loader';
+import { Logger, Module } from '@nestjs/common';
+import { ModuleMetadata } from '@nestjs/common/interfaces';
+import { ApplicationConfig } from '@nestjs/core/application-config';
 import { NestContainer } from '@nestjs/core/injector/container';
-import { OverrideByFactoryOptions, OverrideBy } from './interfaces';
-import { Module } from '@nestjs/common';
+import { InstanceLoader } from '@nestjs/core/injector/instance-loader';
 import { MetadataScanner } from '@nestjs/core/metadata-scanner';
 import { DependenciesScanner } from '@nestjs/core/scanner';
-import { ModuleMetadata } from '@nestjs/common/interfaces';
+import * as deprecate from 'deprecate';
+import { OverrideBy, OverrideByFactoryOptions } from './interfaces';
+import { TestingLogger } from './services/testing-logger.service';
 import { TestingModule } from './testing-module';
-import { ApplicationConfig } from '@nestjs/core/application-config';
 
 export class TestingModuleBuilder {
   private readonly applicationConfig = new ApplicationConfig();
-  private readonly container = new NestContainer();
+  private readonly container = new NestContainer(this.applicationConfig);
   private readonly overloadsMap = new Map();
   private readonly scanner: DependenciesScanner;
   private readonly instanceLoader = new InstanceLoader(this.container);
@@ -24,7 +25,6 @@ export class TestingModuleBuilder {
       this.applicationConfig,
     );
     this.module = this.createModule(metadata);
-    this.scanner.scan(this.module);
   }
 
   public overridePipe(typeOrToken): OverrideBy {
@@ -56,14 +56,14 @@ export class TestingModuleBuilder {
   }
 
   public async compile(): Promise<TestingModule> {
-    [...this.overloadsMap.entries()].map(([component, options]) => {
-      this.container.replace(component, options);
-    });
+    this.applyLogger();
+    await this.scanner.scan(this.module);
+
+    this.applyOverloadsMap();
     await this.instanceLoader.createInstancesOfDependencies();
     this.scanner.applyApplicationProviders();
 
-    const modules = this.container.getModules().values();
-    const root = modules.next().value;
+    const root = this.getRootModule();
     return new TestingModule(this.container, [], root, this.applicationConfig);
   }
 
@@ -89,9 +89,24 @@ export class TestingModuleBuilder {
     };
   }
 
+  private applyOverloadsMap() {
+    [...this.overloadsMap.entries()].forEach(([component, options]) => {
+      this.container.replace(component, options);
+    });
+  }
+
+  private getRootModule() {
+    const modules = this.container.getModules().values();
+    return modules.next().value;
+  }
+
   private createModule(metadata) {
     class TestModule {}
     Module(metadata)(TestModule);
     return TestModule;
+  }
+
+  private applyLogger() {
+    Logger.overrideLogger(new TestingLogger());
   }
 }

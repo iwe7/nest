@@ -1,22 +1,9 @@
-import 'reflect-metadata';
-import iterate from 'iterare';
-import { Controller } from '@nestjs/common/interfaces/controllers/controller.interface';
-import { ExceptionsHandler } from '../exceptions/exceptions-handler';
-import {
-  EXCEPTION_FILTERS_METADATA,
-  FILTER_CATCH_EXCEPTIONS,
-} from '@nestjs/common/constants';
-import {
-  isEmpty,
-  isFunction,
-  isUndefined,
-} from '@nestjs/common/utils/shared.utils';
-import { Type } from '@nestjs/common/interfaces/index';
-import { ExceptionFilterMetadata } from '@nestjs/common/interfaces/exceptions/exception-filter-metadata.interface';
+import { FILTER_CATCH_EXCEPTIONS } from '@nestjs/common/constants';
+import { Type } from '@nestjs/common/interfaces';
 import { ExceptionFilter } from '@nestjs/common/interfaces/exceptions/exception-filter.interface';
-import { RouterProxyCallback } from './../router/router-proxy';
-import { ContextCreator } from './../helpers/context-creator';
-import { ApplicationConfig } from './../application-config';
+import { isEmpty, isFunction, isUndefined } from '@nestjs/common/utils/shared.utils';
+import iterate from 'iterare';
+import { ContextCreator } from '../helpers/context-creator';
 import { NestContainer } from '../injector/container';
 
 export class BaseExceptionFilterContext extends ContextCreator {
@@ -29,7 +16,7 @@ export class BaseExceptionFilterContext extends ContextCreator {
   public createConcreteContext<T extends any[], R extends any[]>(
     metadata: T,
   ): R {
-    if (isUndefined(metadata) || isEmpty(metadata)) {
+    if (isEmpty(metadata)) {
       return [] as R;
     }
     return iterate(metadata)
@@ -45,7 +32,7 @@ export class BaseExceptionFilterContext extends ContextCreator {
   }
 
   public getFilterInstance(filter: Function | ExceptionFilter) {
-    const isObject = !!(filter as ExceptionFilter).catch;
+    const isObject = (filter as ExceptionFilter).catch;
     if (isObject) {
       return filter;
     }
@@ -64,7 +51,7 @@ export class BaseExceptionFilterContext extends ContextCreator {
     if (!module) {
       return undefined;
     }
-    return module.injectables.get((filter as any).name);
+    return module.injectables.get(filter.name);
   }
 
   public reflectCatchExceptions(instance: ExceptionFilter): Type<any>[] {
